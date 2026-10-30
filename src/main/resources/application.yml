@@ -1,0 +1,37 @@
+server:
+  port: ${SERVER_PORT:8090}
+
+spring:
+  application:
+    name: weighbridge-service-be
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://127.0.0.1:3306/asdp_loket?useSSL=false&serverTimezone=Asia/Jakarta&allowPublicKeyRetrieval=true}
+    username: ${SPRING_DATASOURCE_USERNAME:asdp_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:Rahasia123}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 15
+      minimum-idle: 5
+      idle-timeout: 300000
+      max-lifetime: 1800000
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+
+# Weighbridge Hardware Configuration
+weighbridge:
+  scale:
+    device-id: ${SCALE_DEVICE_ID:WB-MERAK-01}
+    default-tolerance-percent: 5.0
+    require-stable: ${SCALE_REQUIRE_STABLE:false}
+    mock-stream-enabled: ${SCALE_MOCK_STREAM:true}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
