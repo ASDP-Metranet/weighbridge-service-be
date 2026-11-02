@@ -102,23 +102,10 @@ public class WeighbridgeValidationController {
             existingBerat = num.doubleValue();
         }
 
-        // KASUS 2: Tiket Sudah Check In / Boarded / Sudah Pernah Ditimbang (Layar MERAH - Page 8)
+        // KASUS 2: Tiket Sudah Check In / Boarded (Layar MERAH - Page 8)
         boolean isAlreadyCheckedIn = (ticketStatus == 1 || ticketStatus == 4 || checkInTime != null);
-        boolean isAlreadyWeighed = (existingBerat != null && existingBerat > 0);
-        if (!isAlreadyWeighed) {
-            try {
-                Integer weighCount = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM vehicle_weighing WHERE (order_id = ? OR booking_code = ?) AND weigh_status = 'SUCCESS'",
-                    Integer.class,
-                    orderId, bookingCode
-                );
-                if (weighCount != null && weighCount > 0) {
-                    isAlreadyWeighed = true;
-                }
-            } catch (Exception ignored) {}
-        }
 
-        if (isAlreadyCheckedIn || isAlreadyWeighed) {
+        if (isAlreadyCheckedIn) {
             return ResponseEntity.ok(WeighValidationResponse.builder()
                     .status(StatusState.ALREADY_CHECKED_IN)
                     .bookingCode(bookingCode)
