@@ -35,57 +35,52 @@ public class WeighbridgeValidationController {
     @Transactional
     public ResponseEntity<WeighValidationResponse> validateAndRecordWeight(@Valid @RequestBody WeighValidationRequest request) {
         String input = request.getBarcodeInput().trim().toUpperCase();
-        log.info("Menerima request validasi barcode jembatan timbang: {}", input);
+        String searchType = request.getSearchType();
+        log.info("Menerima request validasi barcode jembatan timbang: {} (searchType: {})", input, searchType);
 
-        // 1. Query data order & order_items berdasarkan Kode Booking / No Tiket / Order ID
-        String query = """
-            SELECT o.id AS order_id, o.booking_code, o.schedule_departure, 
+        // 1. Query data order & order_items berdasarkan pilihan dropdown (Kode Booking / No Tiket / Order ID)
+        String baseQuery = """
+            SELECT o.id AS order_id, o.booking_code, o.schedule_departure, o.status AS order_status,
                    oi.id AS order_item_id, oi.ticket_number, oi.status AS ticket_status, 
-                   oi.service_name, v.id AS vehicle_id, v.license_plate
+                   oi.check_in_time, oi.service_name, v.id AS vehicle_id, v.license_plate, v.berat AS vehicle_berat
             FROM orders o
             JOIN order_items oi ON oi.order_id = o.id
-            LEFT JOIN vehicles v ON v.order_id = o.id
-            WHERE o.booking_code = ? OR oi.ticket_number = ? OR o.id = ?
-            LIMIT 1
+            LEFT JOIN vehicles v ON (v.order_id = o.id OR v.id = oi.vehicle_id)
         """;
+
+        String query;
+        Object[] params;
+        String invalidMsg = "KODE BOOKING TIDAK VALID";
+
+        if (searchType != null && (searchType.equalsIgnoreCase("No Tiket") || searchType.equalsIgnoreCase("TIKET") || searchType.equalsIgnoreCase("TICKET"))) {
+            query = baseQuery + " WHERE oi.ticket_number = ? LIMIT 1";
+            params = new Object[]{input};
+            invalidMsg = "NOMOR TIKET TIDAK VALID";
+        } else if (searchType != null && (searchType.equalsIgnoreCase("Order ID") || searchType.equalsIgnoreCase("ORDER"))) {
+            query = baseQuery + " WHERE o.id = ? LIMIT 1";
+            params = new Object[]{input};
+            invalidMsg = "ORDER ID TIDAK VALID";
+        } else {
+            // Default "Kode Booking"
+            query = baseQuery + " WHERE o.booking_code = ? LIMIT 1";
+            params = new Object[]{input};
+            invalidMsg = "KODE BOOKING TIDAK VALID";
+        }
 
         List<Map<String, Object>> rows;
         try {
-            rows = jdbcTemplate.queryForList(query, input, input, input);
+            rows = jdbcTemplate.queryForList(query, params);
+            log.info("Hasil query database untuk {} (tipe: {}): {} baris ditemukan", input, searchType, rows.size());
         } catch (Exception e) {
-            log.warn("Database connection fallback/mock: {}", e.getMessage());
+            log.error("Database connection fallback/mock error: {}", e.getMessage(), e);
             rows = List.of();
         }
 
-        // KASUS 1: Kode Booking Tidak Ditemukan / Tidak Valid (Layar MERAH - Page 8)
+        // KASUS 1: Kode Booking / No Tiket / Order ID Tidak Ditemukan / Tidak Valid (Layar MERAH - Page 8)
         if (rows.isEmpty()) {
-            // Simulasi demo jika input khusus untuk pengujian UI
-            if (input.equals("INVALID") || input.length() < 5) {
-                return ResponseEntity.ok(WeighValidationResponse.builder()
-                        .status(StatusState.INVALID_BOOKING)
-                        .message("KODE BOOKING TIDAK VALID")
-                        .timestamp(LocalDateTime.now())
-                        .build());
-            } else if (input.equals("CHECKEDIN")) {
-                return ResponseEntity.ok(WeighValidationResponse.builder()
-                        .status(StatusState.ALREADY_CHECKED_IN)
-                        .bookingCode("10AP7EEC")
-                        .message("TIKET SUDAH CHECK IN")
-                        .timestamp(LocalDateTime.now())
-                        .build());
-            } else if (input.equals("EXPIRED")) {
-                return ResponseEntity.ok(WeighValidationResponse.builder()
-                        .status(StatusState.EXPIRED)
-                        .bookingCode("EXPIRED01")
-                        .message("TIKET EXPIRED")
-                        .timestamp(LocalDateTime.now())
-                        .build());
-            }
-
-            // Default jika tidak ditemukan di DB
             return ResponseEntity.ok(WeighValidationResponse.builder()
                     .status(StatusState.INVALID_BOOKING)
-                    .message("KODE BOOKING TIDAK VALID")
+                    .message(invalidMsg)
                     .timestamp(LocalDateTime.now())
                     .build());
         }
@@ -99,9 +94,31 @@ public class WeighbridgeValidationController {
         String serviceName = (String) data.get("service_name");
         Number statusNum = (Number) data.get("ticket_status");
         int ticketStatus = statusNum != null ? statusNum.intValue() : 0;
+        Number orderStatusNum = (Number) data.get("order_status");
+        int orderStatus = orderStatusNum != null ? orderStatusNum.intValue() : 0;
+        Object checkInTime = data.get("check_in_time");
+        Double existingBerat = null;
+        if (data.get("vehicle_berat") instanceof Number num) {
+            existingBerat = num.doubleValue();
+        }
 
-        // KASUS 2: Tiket Sudah Check In / Boarded (Layar KUNING/MERAH - Page 8)
-        if (ticketStatus == 1 || ticketStatus == 4) {
+        // KASUS 2: Tiket Sudah Check In / Boarded / Sudah Pernah Ditimbang (Layar MERAH - Page 8)
+        boolean isAlreadyCheckedIn = (ticketStatus == 1 || ticketStatus == 4 || checkInTime != null);
+        boolean isAlreadyWeighed = (existingBerat != null && existingBerat > 0);
+        if (!isAlreadyWeighed) {
+            try {
+                Integer weighCount = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM vehicle_weighing WHERE (order_id = ? OR booking_code = ?) AND weigh_status = 'SUCCESS'",
+                    Integer.class,
+                    orderId, bookingCode
+                );
+                if (weighCount != null && weighCount > 0) {
+                    isAlreadyWeighed = true;
+                }
+            } catch (Exception ignored) {}
+        }
+
+        if (isAlreadyCheckedIn || isAlreadyWeighed) {
             return ResponseEntity.ok(WeighValidationResponse.builder()
                     .status(StatusState.ALREADY_CHECKED_IN)
                     .bookingCode(bookingCode)
@@ -113,15 +130,39 @@ public class WeighbridgeValidationController {
         }
 
         // KASUS 3: Tiket Expired (Layar MERAH - Page 9)
-        // Diimplementasikan jika schedule_departure telah melewati batas cut-off
-        Object scheduleDepObj = data.get("schedule_departure");
-        if (scheduleDepObj != null && scheduleDepObj.toString().contains("2020")) {
+        if (orderStatus == 5) {
             return ResponseEntity.ok(WeighValidationResponse.builder()
                     .status(StatusState.EXPIRED)
                     .bookingCode(bookingCode)
+                    .ticketNumber(ticketNumber)
+                    .licensePlate(licensePlate)
                     .message("TIKET EXPIRED")
                     .timestamp(LocalDateTime.now())
                     .build());
+        }
+
+        Object scheduleDepObj = data.get("schedule_departure");
+        if (scheduleDepObj != null) {
+            try {
+                LocalDateTime depTime = null;
+                if (scheduleDepObj instanceof java.sql.Timestamp ts) {
+                    depTime = ts.toLocalDateTime();
+                } else if (scheduleDepObj instanceof LocalDateTime ldt) {
+                    depTime = ldt;
+                } else {
+                    depTime = LocalDateTime.parse(scheduleDepObj.toString().replace(" ", "T"));
+                }
+                if (depTime.plusHours(2).isBefore(LocalDateTime.now())) {
+                    return ResponseEntity.ok(WeighValidationResponse.builder()
+                            .status(StatusState.EXPIRED)
+                            .bookingCode(bookingCode)
+                            .ticketNumber(ticketNumber)
+                            .licensePlate(licensePlate)
+                            .message("TIKET EXPIRED")
+                            .timestamp(LocalDateTime.now())
+                            .build());
+                }
+            } catch (Exception ignored) {}
         }
 
         // KASUS 4: Tiket Sah & Berhasil Input Berat (Layar HIJAU - Page 7)
@@ -131,12 +172,12 @@ public class WeighbridgeValidationController {
                 .vehicleId(vehicleId)
                 .bookingCode(bookingCode)
                 .ticketNumber(ticketNumber)
-                .licensePlate(licensePlate != null ? licensePlate : "B9918UFV")
+                .licensePlate(licensePlate)
                 .actualWeight(request.getActualWeight())
                 .isStable(request.getIsStable() != null ? request.getIsStable() : true)
                 .weighStatus("SUCCESS")
                 .operatorUsername(request.getOperatorUsername() != null ? request.getOperatorUsername() : "operator_timbang")
-                .scaleDeviceId(request.getDeviceId() != null ? request.getDeviceId() : "WB-MERAK-01")
+                .scaleDeviceId(request.getDeviceId())
                 .createdAt(LocalDateTime.now())
                 .build();
         vehicleWeighingRepository.save(logEntity);

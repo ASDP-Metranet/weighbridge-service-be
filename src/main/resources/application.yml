@@ -5,9 +5,9 @@ spring:
   application:
     name: weighbridge-service-be
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://157.10.253.209:3306/Core_ticketing?useSSL=false&allowPublicKeyRetrieval=true&zeroDateTimeBehavior=convertToNull&serverTimezone=Asia/Jakarta}
-    username: ${SPRING_DATASOURCE_USERNAME:root}
-    password: ${SPRING_DATASOURCE_PASSWORD:By4T6zPkZsYJ1lMmz8kHGNaw}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://127.0.0.1:3306/asdp_loket?useSSL=false&allowPublicKeyRetrieval=true&zeroDateTimeBehavior=convertToNull&serverTimezone=Asia/Jakarta}
+    username: ${SPRING_DATASOURCE_USERNAME:asdp_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:Rahasia123}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       maximum-pool-size: 15

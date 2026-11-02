@@ -16,6 +16,8 @@ public class WeighValidationRequest {
     @NotBlank(message = "Kode Barcode (Kode Booking / No. Tiket / Order ID) tidak boleh kosong.")
     private String barcodeInput;
 
+    private String searchType;
+
     @NotNull(message = "Bobot timbangan harus terisi.")
     private Float actualWeight;
 
