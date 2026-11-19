@@ -28,7 +28,7 @@ public class WeighbridgeValidationController {
     private final JdbcTemplate jdbcTemplate;
 
     /**
-     * Endpoint utama validasi dan perekaman berat di REPO BARU Pos Jembatan Timbang.
+     * Endpoint utama validasi dan perekaman berat di Pos Jembatan Timbang.
      * Mengimplementasikan 4 Status Layar sesuai Technical Req Jembatan Timbang.pdf (Page 7 - 9).
      */
     @PostMapping("/validate")
@@ -38,46 +38,56 @@ public class WeighbridgeValidationController {
         String searchType = request.getSearchType();
         log.info("Menerima request validasi barcode jembatan timbang: {} (searchType: {})", input, searchType);
 
-        // 1. Query data order & order_items berdasarkan pilihan dropdown (Kode Booking / No Tiket / Order ID)
-        String baseQuery = """
-            SELECT o.id AS order_id, o.booking_code, o.schedule_departure, o.status AS order_status,
-                   oi.id AS order_item_id, oi.ticket_number, oi.status AS ticket_status, 
-                   oi.check_in_time, oi.service_name, v.id AS vehicle_id, v.license_plate, v.berat AS vehicle_berat
-            FROM orders o
-            JOIN order_items oi ON oi.order_id = o.id
-            LEFT JOIN vehicles v ON (v.order_id = o.id OR v.id = oi.vehicle_id)
-        """;
-
-        String query;
-        Object[] params;
+        // 1. Query order berdasarkan pilihan dropdown (Kode Booking / No Tiket / Order ID)
+        String orderId = null;
+        Map<String, Object> orderData = null;
         String invalidMsg = "KODE BOOKING TIDAK VALID";
 
-        if (searchType != null && (searchType.equalsIgnoreCase("No Tiket") || searchType.equalsIgnoreCase("TIKET") || searchType.equalsIgnoreCase("TICKET"))) {
-            query = baseQuery + " WHERE oi.ticket_number = ? LIMIT 1";
-            params = new Object[]{input};
-            invalidMsg = "NOMOR TIKET TIDAK VALID";
-        } else if (searchType != null && (searchType.equalsIgnoreCase("Order ID") || searchType.equalsIgnoreCase("ORDER"))) {
-            query = baseQuery + " WHERE o.id = ? LIMIT 1";
-            params = new Object[]{input};
-            invalidMsg = "ORDER ID TIDAK VALID";
-        } else {
-            // Default "Kode Booking"
-            query = baseQuery + " WHERE o.booking_code = ? LIMIT 1";
-            params = new Object[]{input};
-            invalidMsg = "KODE BOOKING TIDAK VALID";
-        }
-
-        List<Map<String, Object>> rows;
         try {
-            rows = jdbcTemplate.queryForList(query, params);
-            log.info("Hasil query database untuk {} (tipe: {}): {} baris ditemukan", input, searchType, rows.size());
+            if (searchType != null && (searchType.equalsIgnoreCase("No Tiket") || searchType.equalsIgnoreCase("TIKET") || searchType.equalsIgnoreCase("TICKET"))) {
+                invalidMsg = "NOMOR TIKET TIDAK VALID";
+                List<Map<String, Object>> itemRows = jdbcTemplate.queryForList(
+                    "SELECT oi.order_id FROM order_items oi WHERE oi.ticket_number = ? LIMIT 1", 
+                    input
+                );
+                if (!itemRows.isEmpty()) {
+                    orderId = (String) itemRows.get(0).get("order_id");
+                    List<Map<String, Object>> orderRows = jdbcTemplate.queryForList(
+                        "SELECT o.id AS order_id, o.booking_code, o.schedule_departure, o.status AS order_status FROM orders o WHERE o.id = ? LIMIT 1", 
+                        orderId
+                    );
+                    if (!orderRows.isEmpty()) {
+                        orderData = orderRows.get(0);
+                    }
+                }
+            } else if (searchType != null && (searchType.equalsIgnoreCase("Order ID") || searchType.equalsIgnoreCase("ORDER"))) {
+                invalidMsg = "ORDER ID TIDAK VALID";
+                List<Map<String, Object>> orderRows = jdbcTemplate.queryForList(
+                    "SELECT o.id AS order_id, o.booking_code, o.schedule_departure, o.status AS order_status FROM orders o WHERE o.id = ? LIMIT 1", 
+                    input
+                );
+                if (!orderRows.isEmpty()) {
+                    orderData = orderRows.get(0);
+                    orderId = (String) orderData.get("order_id");
+                }
+            } else {
+                // Default: "Kode Booking"
+                invalidMsg = "KODE BOOKING TIDAK VALID";
+                List<Map<String, Object>> orderRows = jdbcTemplate.queryForList(
+                    "SELECT o.id AS order_id, o.booking_code, o.schedule_departure, o.status AS order_status FROM orders o WHERE o.booking_code = ? LIMIT 1", 
+                    input
+                );
+                if (!orderRows.isEmpty()) {
+                    orderData = orderRows.get(0);
+                    orderId = (String) orderData.get("order_id");
+                }
+            }
         } catch (Exception e) {
-            log.error("Database connection fallback/mock error: {}", e.getMessage(), e);
-            rows = List.of();
+            log.warn("Database order query error: {}", e.getMessage());
         }
 
         // KASUS 1: Kode Booking / No Tiket / Order ID Tidak Ditemukan / Tidak Valid (Layar MERAH - Page 8)
-        if (rows.isEmpty()) {
+        if (orderData == null) {
             return ResponseEntity.ok(WeighValidationResponse.builder()
                     .status(StatusState.INVALID_BOOKING)
                     .message(invalidMsg)
@@ -85,27 +95,62 @@ public class WeighbridgeValidationController {
                     .build());
         }
 
-        Map<String, Object> data = rows.get(0);
-        String orderId = (String) data.get("order_id");
-        String vehicleId = (String) data.get("vehicle_id");
-        String bookingCode = (String) data.get("booking_code");
-        String ticketNumber = (String) data.get("ticket_number");
-        String licensePlate = (String) data.get("license_plate");
-        String serviceName = (String) data.get("service_name");
-        Number statusNum = (Number) data.get("ticket_status");
-        int ticketStatus = statusNum != null ? statusNum.intValue() : 0;
-        Number orderStatusNum = (Number) data.get("order_status");
-        int orderStatus = orderStatusNum != null ? orderStatusNum.intValue() : 0;
-        Object checkInTime = data.get("check_in_time");
-        Double existingBerat = null;
-        if (data.get("vehicle_berat") instanceof Number num) {
-            existingBerat = num.doubleValue();
+        // Query details per order_id
+        String bookingCode = (String) orderData.get("booking_code");
+        String ticketNumber = null;
+        String licensePlate = null;
+        String serviceName = "-";
+        int ticketStatus = 0;
+        String vehicleId = null;
+        Object checkInTime = null;
+
+        try {
+            List<Map<String, Object>> detailRows = jdbcTemplate.queryForList("""
+                SELECT oi.ticket_number, oi.status AS ticket_status, oi.check_in_time, s.name AS service_name,
+                       v.id AS vehicle_id, v.license_plate, v.berat AS vehicle_berat, oi.service_type
+                FROM order_items oi
+                LEFT JOIN services s ON s.id = oi.service_id
+                LEFT JOIN vehicles v ON v.order_id = ?
+                WHERE oi.order_id = ?
+                ORDER BY CASE WHEN oi.service_type = 'vehicle' THEN 0 ELSE 1 END, oi.id ASC
+                LIMIT 1
+            """, orderId, orderId);
+
+            if (!detailRows.isEmpty()) {
+                Map<String, Object> det = detailRows.get(0);
+                ticketNumber = (String) det.get("ticket_number");
+                licensePlate = (String) det.get("license_plate");
+                if (det.get("service_name") != null) serviceName = (String) det.get("service_name");
+                Object sObj = det.get("ticket_status");
+                if (sObj instanceof Boolean b) {
+                    ticketStatus = b ? 1 : 0;
+                } else if (sObj instanceof Number num) {
+                    ticketStatus = num.intValue();
+                }
+                vehicleId = (String) det.get("vehicle_id");
+                checkInTime = det.get("check_in_time");
+            }
+        } catch (Exception e) {
+            log.warn("Detail query error: {}", e.getMessage());
+        }
+
+        // Penolakan tiket pejalan kaki murni (bukan kendaraan)
+        if (vehicleId == null) {
+            return ResponseEntity.ok(WeighValidationResponse.builder()
+                    .status(StatusState.INVALID_BOOKING)
+                    .bookingCode(bookingCode)
+                    .ticketNumber(ticketNumber)
+                    .message("Bukan Tiket Kendaraan")
+                    .timestamp(LocalDateTime.now())
+                    .build());
         }
 
         // KASUS 2: Tiket Sudah Check In / Boarded (Layar MERAH - Page 8)
-        boolean isAlreadyCheckedIn = (ticketStatus == 1 || ticketStatus == 4 || checkInTime != null);
+        // Concurrency lock: order_items dengan service_type = 'vehicle' dikunci FOR UPDATE
+        boolean isAlreadyCheckedIn = isOrderAlreadyCheckedIn(orderId, ticketStatus, checkInTime);
 
         if (isAlreadyCheckedIn) {
+            recordAuditLog(orderId, bookingCode, ticketNumber, vehicleId, licensePlate, request, "REJECTED");
             return ResponseEntity.ok(WeighValidationResponse.builder()
                     .status(StatusState.ALREADY_CHECKED_IN)
                     .bookingCode(bookingCode)
@@ -117,7 +162,10 @@ public class WeighbridgeValidationController {
         }
 
         // KASUS 3: Tiket Expired (Layar MERAH - Page 9)
+        Number orderStatusNum = (Number) orderData.get("order_status");
+        int orderStatus = orderStatusNum != null ? orderStatusNum.intValue() : 0;
         if (orderStatus == 5) {
+            recordAuditLog(orderId, bookingCode, ticketNumber, vehicleId, licensePlate, request, "REJECTED");
             return ResponseEntity.ok(WeighValidationResponse.builder()
                     .status(StatusState.EXPIRED)
                     .bookingCode(bookingCode)
@@ -128,7 +176,7 @@ public class WeighbridgeValidationController {
                     .build());
         }
 
-        Object scheduleDepObj = data.get("schedule_departure");
+        Object scheduleDepObj = orderData.get("schedule_departure");
         if (scheduleDepObj != null) {
             try {
                 LocalDateTime depTime = null;
@@ -139,7 +187,21 @@ public class WeighbridgeValidationController {
                 } else {
                     depTime = LocalDateTime.parse(scheduleDepObj.toString().replace(" ", "T"));
                 }
-                if (depTime.plusHours(2).isBefore(LocalDateTime.now())) {
+
+                // Ambil parameter late_check_in dinamis dari tabel settings (default fallback: 2 jam)
+                long lateCheckInHours = 2L;
+                try {
+                    List<Map<String, Object>> settingRows = jdbcTemplate.queryForList(
+                        "SELECT set_value FROM settings WHERE set_name = 'late_check_in' LIMIT 1"
+                    );
+                    if (!settingRows.isEmpty() && settingRows.get(0).get("set_value") != null) {
+                        lateCheckInHours = Long.parseLong(settingRows.get(0).get("set_value").toString());
+                    }
+                } catch (Exception ignored) {}
+
+                // Jika jadwal keberangkatan + toleransi late_check_in telah lewat
+                if (depTime.plusHours(lateCheckInHours).isBefore(LocalDateTime.now())) {
+                    recordAuditLog(orderId, bookingCode, ticketNumber, vehicleId, licensePlate, request, "REJECTED");
                     return ResponseEntity.ok(WeighValidationResponse.builder()
                             .status(StatusState.EXPIRED)
                             .bookingCode(bookingCode)
@@ -149,34 +211,24 @@ public class WeighbridgeValidationController {
                             .timestamp(LocalDateTime.now())
                             .build());
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                log.warn("Gagal parse schedule_departure: {}", e.getMessage());
+            }
         }
 
         // KASUS 4: Tiket Sah & Berhasil Input Berat (Layar HIJAU - Page 7)
-        // A. Insert ke tabel vehicle_weighing (Audit Log Append-Only)
-        VehicleWeighing logEntity = VehicleWeighing.builder()
-                .orderId(orderId)
-                .vehicleId(vehicleId)
-                .bookingCode(bookingCode)
-                .ticketNumber(ticketNumber)
-                .licensePlate(licensePlate)
-                .actualWeight(request.getActualWeight())
-                .isStable(request.getIsStable() != null ? request.getIsStable() : true)
-                .weighStatus("SUCCESS")
-                .operatorUsername(request.getOperatorUsername() != null ? request.getOperatorUsername() : "operator_timbang")
-                .scaleDeviceId(request.getDeviceId())
-                .createdAt(LocalDateTime.now())
-                .build();
-        vehicleWeighingRepository.save(logEntity);
+        boolean notWeighed = request.getActualWeight() == null || request.getActualWeight() <= 0;
+        float actualWeightVal = notWeighed ? 0.0f : request.getActualWeight();
+        String weighStatus = notWeighed ? "NOT_WEIGHED" : "SUCCESS";
 
-        // B. Update kolom berat pada tabel vehicles
-        if (vehicleId != null) {
-            try {
-                jdbcTemplate.update("UPDATE vehicles SET berat = ? WHERE id = ?", request.getActualWeight(), vehicleId);
-            } catch (Exception e) {
-                log.warn("Tidak dapat update vehicles.berat: {}", e.getMessage());
-            }
-        }
+        // A. BR-05: record aktif lama untuk kendaraan ini di-SUPERSEDED sebelum record baru ditulis
+        supersedePreviousWeighings(orderId, vehicleId);
+
+        // B. Insert audit log (append-only) ke vehicle_weighing
+        recordAuditLog(orderId, bookingCode, ticketNumber, vehicleId, licensePlate, request, weighStatus);
+
+        // C. Update kolom berat pada tabel vehicles dengan anti-misassociation check
+        updateVehicleWeight(vehicleId, orderId, actualWeightVal);
 
         return ResponseEntity.ok(WeighValidationResponse.builder()
                 .status(StatusState.SUCCESS)
@@ -185,9 +237,99 @@ public class WeighbridgeValidationController {
                 .ticketNumber(ticketNumber)
                 .licensePlate(licensePlate)
                 .vehicleClass(serviceName)
-                .recordedWeight(request.getActualWeight())
-                .isStable(request.getIsStable())
+                .recordedWeight(actualWeightVal)
+                .isStable(request.getIsStable() != null ? request.getIsStable() : true)
                 .timestamp(LocalDateTime.now())
                 .build());
+    }
+
+    /**
+     * True bila salah satu item kendaraan pada order sudah check-in (status 1) / boarded (status 4)
+     * atau sudah punya check_in_time. Baris dikunci agar konsisten dengan proses check-in loket.
+     */
+    private boolean isOrderAlreadyCheckedIn(String orderId, int fallbackStatus, Object fallbackCheckInTime) {
+        List<Map<String, Object>> items = jdbcTemplate.queryForList(
+            "SELECT oi.status, oi.check_in_time FROM order_items oi " +
+            "WHERE oi.order_id = ? AND oi.service_type = 'vehicle' FOR UPDATE",
+            orderId
+        );
+        if (items.isEmpty()) {
+            return fallbackStatus == 1 || fallbackStatus == 4 || fallbackCheckInTime != null;
+        }
+        for (Map<String, Object> item : items) {
+            int status = 0;
+            Object sObj = item.get("status");
+            if (sObj instanceof Boolean b) {
+                status = b ? 1 : 0;
+            } else if (sObj instanceof Number num) {
+                status = num.intValue();
+            }
+            if (status == 1 || status == 4 || item.get("check_in_time") != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * BR-05 (Re-Weigh Guard): satu kendaraan/tiket hanya punya satu record aktif.
+     * Record SUCCESS / NOT_WEIGHED sebelumnya ditandai SUPERSEDED; riwayat REJECTED tidak disentuh.
+     */
+    private void supersedePreviousWeighings(String orderId, String vehicleId) {
+        jdbcTemplate.update(
+            "UPDATE vehicle_weighing SET weigh_status = 'SUPERSEDED' " +
+            "WHERE order_id = ? AND vehicle_id = ? AND weigh_status IN ('SUCCESS', 'NOT_WEIGHED')",
+            orderId, vehicleId);
+    }
+
+    /**
+     * Anti-misassociation: berat hanya ditimpa pada kendaraan milik order yang sama.
+     * Bila tidak tepat 1 baris ter-update, lempar exception sehingga transaksi di-rollback.
+     */
+    private void updateVehicleWeight(String vehicleId, String orderId, float weight) {
+        int updated = jdbcTemplate.update(
+            "UPDATE vehicles SET berat = ? WHERE id = ? AND order_id = ?", weight, vehicleId, orderId);
+        if (updated != 1) {
+            throw new IllegalStateException("Gagal memperbarui vehicles.berat: kendaraan " + vehicleId
+                    + " tidak cocok dengan order " + orderId + " (baris ter-update: " + updated + ")");
+        }
+    }
+
+    private void recordAuditLog(String orderId, String bookingCode, String ticketNumber, String vehicleId,
+                                String licensePlate, WeighValidationRequest request, String status) {
+        VehicleWeighing logEntity = VehicleWeighing.builder()
+                .orderId(orderId)
+                .bookingCode(bookingCode)
+                .ticketNumber(ticketNumber)
+                .vehicleId(vehicleId)
+                .licensePlate(licensePlate != null ? licensePlate : "-")
+                .actualWeight(request.getActualWeight() != null ? request.getActualWeight() : 0.0f)
+                .isStable(request.getIsStable() != null ? request.getIsStable() : true)
+                .weighStatus(status)
+                .operatorUsername(request.getOperatorUsername() != null && !request.getOperatorUsername().isBlank() 
+                        ? request.getOperatorUsername() : "operator_timbang")
+                .scaleDeviceId(request.getDeviceId() != null ? request.getDeviceId() : "WB-MERAK-01")
+                .createdAt(LocalDateTime.now())
+                .build();
+        vehicleWeighingRepository.save(logEntity);
+    }
+
+    /**
+     * Endpoint untuk mengambil riwayat penimbangan terbaru dari database.
+     */
+    @GetMapping("/recent")
+    public ResponseEntity<?> getRecentWeighings() {
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT id, order_id, booking_code, ticket_number, license_plate, " +
+                "actual_weight, weigh_status, is_stable, created_at, operator_username " +
+                "FROM vehicle_weighing ORDER BY id DESC LIMIT 10"
+            );
+            return ResponseEntity.ok(rows);
+        } catch (Exception e) {
+            log.error("Gagal mengambil riwayat penimbangan", e);
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Gagal mengambil riwayat penimbangan"));
+        }
     }
 }
