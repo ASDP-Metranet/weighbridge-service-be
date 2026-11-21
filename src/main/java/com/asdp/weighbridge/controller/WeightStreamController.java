@@ -1,6 +1,7 @@
 package com.asdp.weighbridge.controller;
 
 import com.asdp.weighbridge.dto.WeightReadingDto;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -25,7 +26,7 @@ public class WeightStreamController {
     private final AtomicReference<WeightReadingDto> currentReading = new AtomicReference<>();
     private final Random random = new Random();
 
-    @Value("${weighbridge.scale.device-id:WB-MERAK-01}")
+    @Value("${weighbridge.scale.device-id:}")
     private String deviceId;
 
     public WeightStreamController() {
@@ -35,9 +36,26 @@ public class WeightStreamController {
                 .isStable(true)
                 .isConnected(true)
                 .unit("kg")
-                .deviceId("WB-MERAK-01")
+                .deviceId(null)
                 .timestamp(System.currentTimeMillis())
                 .build());
+    }
+
+    @PostConstruct
+    public void init() {
+        if (this.deviceId != null && !this.deviceId.isBlank()) {
+            WeightReadingDto initial = this.currentReading.get();
+            if (initial != null) {
+                this.currentReading.set(WeightReadingDto.builder()
+                        .weight(initial.getWeight())
+                        .isStable(initial.getIsStable())
+                        .isConnected(initial.getIsConnected())
+                        .unit(initial.getUnit())
+                        .deviceId(this.deviceId)
+                        .timestamp(initial.getTimestamp())
+                        .build());
+            }
+        }
     }
 
     /**

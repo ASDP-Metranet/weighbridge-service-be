@@ -25,7 +25,7 @@ spring:
 # Weighbridge Hardware Configuration
 weighbridge:
   scale:
-    device-id: ${SCALE_DEVICE_ID:WB-MERAK-01}
+    device-id: ${SCALE_DEVICE_ID:}
     default-tolerance-percent: 5.0
     require-stable: ${SCALE_REQUIRE_STABLE:false}
     mock-stream-enabled: ${SCALE_MOCK_STREAM:true}

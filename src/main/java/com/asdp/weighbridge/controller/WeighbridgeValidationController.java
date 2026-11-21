@@ -307,8 +307,8 @@ public class WeighbridgeValidationController {
                 .isStable(request.getIsStable() != null ? request.getIsStable() : true)
                 .weighStatus(status)
                 .operatorUsername(request.getOperatorUsername() != null && !request.getOperatorUsername().isBlank() 
-                        ? request.getOperatorUsername() : "operator_timbang")
-                .scaleDeviceId(request.getDeviceId() != null ? request.getDeviceId() : "WB-MERAK-01")
+                        ? request.getOperatorUsername() : null)
+                .scaleDeviceId(request.getDeviceId())
                 .createdAt(LocalDateTime.now())
                 .build();
         vehicleWeighingRepository.save(logEntity);
