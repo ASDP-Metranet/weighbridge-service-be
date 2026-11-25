@@ -17,7 +17,8 @@ public class WeighValidationResponse {
         SUCCESS,              // Layar HIJAU: Berhasil input berat
         INVALID_BOOKING,      // Layar MERAH: Kode Booking Tidak Valid
         ALREADY_CHECKED_IN,   // Layar KUNING/MERAH: Tiket Sudah Check-In
-        EXPIRED               // Layar MERAH: Tiket Expired
+        EXPIRED,              // Layar MERAH: Tiket Expired
+        NON_GOODS_VEHICLE     // Popup: Golongan Kendaraan Bukan Barang
     }
 
     private StatusState status;
