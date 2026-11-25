@@ -26,9 +26,6 @@ public class WeightStreamController {
     private final AtomicReference<WeightReadingDto> currentReading = new AtomicReference<>();
     private final Random random = new Random();
 
-    @Value("${weighbridge.scale.device-id:}")
-    private String deviceId;
-
     public WeightStreamController() {
         // Initialize default baseline weight
         this.currentReading.set(WeightReadingDto.builder()
@@ -36,26 +33,8 @@ public class WeightStreamController {
                 .isStable(true)
                 .isConnected(true)
                 .unit("kg")
-                .deviceId(null)
                 .timestamp(System.currentTimeMillis())
                 .build());
-    }
-
-    @PostConstruct
-    public void init() {
-        if (this.deviceId != null && !this.deviceId.isBlank()) {
-            WeightReadingDto initial = this.currentReading.get();
-            if (initial != null) {
-                this.currentReading.set(WeightReadingDto.builder()
-                        .weight(initial.getWeight())
-                        .isStable(initial.getIsStable())
-                        .isConnected(initial.getIsConnected())
-                        .unit(initial.getUnit())
-                        .deviceId(this.deviceId)
-                        .timestamp(initial.getTimestamp())
-                        .build());
-            }
-        }
     }
 
     /**
@@ -103,7 +82,6 @@ public class WeightStreamController {
                 .isStable(isStable)
                 .isConnected(true)
                 .unit("kg")
-                .deviceId(deviceId)
                 .timestamp(System.currentTimeMillis())
                 .build();
 
@@ -129,7 +107,6 @@ public class WeightStreamController {
                 .isStable(isStable)
                 .isConnected(isConnected)
                 .unit("kg")
-                .deviceId(deviceId)
                 .timestamp(System.currentTimeMillis())
                 .build();
         this.currentReading.set(reading);

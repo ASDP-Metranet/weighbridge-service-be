@@ -47,9 +47,6 @@ public class VehicleWeighing {
     @Column(name = "operator_username", length = 100)
     private String operatorUsername;
 
-    @Column(name = "scale_device_id", length = 50)
-    private String scaleDeviceId;
-
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 

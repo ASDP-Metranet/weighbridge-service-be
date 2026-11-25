@@ -24,6 +24,4 @@ public class WeighValidationRequest {
     private Boolean isStable;
 
     private String operatorUsername;
-
-    private String deviceId;
 }

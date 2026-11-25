@@ -16,6 +16,5 @@ public class WeightReadingDto implements Serializable {
     private Boolean isStable;
     private Boolean isConnected;
     private String unit;
-    private String deviceId;
     private Long timestamp;
 }
