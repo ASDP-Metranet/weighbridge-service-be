@@ -103,10 +103,12 @@ public class WeighbridgeValidationController {
         int ticketStatus = 0;
         String vehicleId = null;
         Object checkInTime = null;
+        int isGoods = 0;
 
         try {
             List<Map<String, Object>> detailRows = jdbcTemplate.queryForList("""
                 SELECT oi.ticket_number, oi.status AS ticket_status, oi.check_in_time, s.name AS service_name,
+                       s.is_goods,
                        v.id AS vehicle_id, v.license_plate, v.berat AS vehicle_berat, oi.service_type
                 FROM order_items oi
                 LEFT JOIN services s ON s.id = oi.service_id
@@ -129,6 +131,12 @@ public class WeighbridgeValidationController {
                 }
                 vehicleId = (String) det.get("vehicle_id");
                 checkInTime = det.get("check_in_time");
+                Object gObj = det.get("is_goods");
+                if (gObj instanceof Boolean b) {
+                    isGoods = b ? 1 : 0;
+                } else if (gObj instanceof Number num) {
+                    isGoods = num.intValue();
+                }
             }
         } catch (Exception e) {
             log.warn("Detail query error: {}", e.getMessage());
@@ -141,6 +149,20 @@ public class WeighbridgeValidationController {
                     .bookingCode(bookingCode)
                     .ticketNumber(ticketNumber)
                     .message("Bukan Tiket Kendaraan")
+                    .timestamp(LocalDateTime.now())
+                    .build());
+        }
+
+        // Penolakan kendaraan bukan barang (hanya is_goods == 1 yang diizinkan ditimbang)
+        if (isGoods != 1) {
+            recordAuditLog(orderId, bookingCode, ticketNumber, vehicleId, licensePlate, request, "REJECTED");
+            return ResponseEntity.ok(WeighValidationResponse.builder()
+                    .status(StatusState.NON_GOODS_VEHICLE)
+                    .bookingCode(bookingCode)
+                    .ticketNumber(ticketNumber)
+                    .licensePlate(licensePlate)
+                    .vehicleClass(serviceName)
+                    .message("BUKAN KENDARAAN BARANG")
                     .timestamp(LocalDateTime.now())
                     .build());
         }
