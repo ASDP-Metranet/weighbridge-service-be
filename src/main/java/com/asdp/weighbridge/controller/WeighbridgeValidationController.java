@@ -5,6 +5,7 @@ import com.asdp.weighbridge.dto.WeighValidationResponse;
 import com.asdp.weighbridge.dto.WeighValidationResponse.StatusState;
 import com.asdp.weighbridge.model.VehicleWeighing;
 import com.asdp.weighbridge.repository.VehicleWeighingRepository;
+import com.asdp.weighbridge.repository.VehicleWeighingSpecs;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,6 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -109,14 +111,15 @@ public class WeighbridgeValidationController {
             List<Map<String, Object>> detailRows = jdbcTemplate.queryForList("""
                 SELECT oi.ticket_number, oi.status AS ticket_status, oi.check_in_time, s.name AS service_name,
                        s.is_goods,
-                       v.id AS vehicle_id, v.license_plate, v.berat AS vehicle_berat, oi.service_type
+                       COALESCE(v.id, oi.vehicle_id) AS vehicle_id, COALESCE(v.license_plate, '-') AS license_plate,
+                       v.berat AS vehicle_berat, oi.service_type
                 FROM order_items oi
                 LEFT JOIN services s ON s.id = oi.service_id
-                LEFT JOIN vehicles v ON v.order_id = ?
+                LEFT JOIN vehicles v ON (v.order_id = oi.order_id OR (oi.vehicle_id IS NOT NULL AND v.id = oi.vehicle_id))
                 WHERE oi.order_id = ?
                 ORDER BY CASE WHEN oi.service_type = 'vehicle' THEN 0 ELSE 1 END, oi.id ASC
                 LIMIT 1
-            """, orderId, orderId);
+            """, orderId);
 
             if (!detailRows.isEmpty()) {
                 Map<String, Object> det = detailRows.get(0);
@@ -333,6 +336,29 @@ public class WeighbridgeValidationController {
                 .createdAt(LocalDateTime.now())
                 .build();
         vehicleWeighingRepository.save(logEntity);
+    }
+
+    /**
+     * Cek apakah kode (Kode Booking / No Tiket / Order ID) sudah pernah bertransaksi timbang HARI INI.
+     * Dihitung sebagai transaksi: record vehicle_weighing berstatus SUCCESS, NOT_WEIGHED, atau SUPERSEDED
+     * (record REJECTED tidak dihitung).
+     */
+    @GetMapping("/check-today")
+    public ResponseEntity<Boolean> checkTransactionToday(@RequestParam("code") String code) {
+        String input = code == null ? "" : code.trim().toUpperCase();
+        if (input.isEmpty()) {
+            return ResponseEntity.ok(false);
+        }
+
+        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+        LocalDateTime startOfNextDay = startOfDay.plusDays(1);
+
+        boolean exists = vehicleWeighingRepository.exists(
+                VehicleWeighingSpecs.createdBetween(startOfDay, startOfNextDay)
+                        .and(VehicleWeighingSpecs.statusIn(List.of("SUCCESS", "NOT_WEIGHED", "SUPERSEDED")))
+                        .and(VehicleWeighingSpecs.matchesCode(input)));
+
+        return ResponseEntity.ok(exists);
     }
 
     /**
