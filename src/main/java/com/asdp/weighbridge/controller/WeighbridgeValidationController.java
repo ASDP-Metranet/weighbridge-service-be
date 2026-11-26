@@ -5,6 +5,7 @@ import com.asdp.weighbridge.dto.WeighValidationResponse;
 import com.asdp.weighbridge.dto.WeighValidationResponse.StatusState;
 import com.asdp.weighbridge.model.VehicleWeighing;
 import com.asdp.weighbridge.repository.VehicleWeighingRepository;
+import com.asdp.weighbridge.repository.VehicleWeighingSpecs;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -353,10 +354,12 @@ public class WeighbridgeValidationController {
         LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
         LocalDateTime startOfNextDay = startOfDay.plusDays(1);
 
-        long count = vehicleWeighingRepository.countTransactionsByCode(
-                input, startOfDay, startOfNextDay, List.of("SUCCESS", "NOT_WEIGHED", "SUPERSEDED"));
+        boolean exists = vehicleWeighingRepository.exists(
+                VehicleWeighingSpecs.createdBetween(startOfDay, startOfNextDay)
+                        .and(VehicleWeighingSpecs.statusIn(List.of("SUCCESS", "NOT_WEIGHED", "SUPERSEDED")))
+                        .and(VehicleWeighingSpecs.matchesCode(input)));
 
-        return ResponseEntity.ok(count > 0);
+        return ResponseEntity.ok(exists);
     }
 
     /**
