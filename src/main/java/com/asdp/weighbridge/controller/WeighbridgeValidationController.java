@@ -111,14 +111,14 @@ public class WeighbridgeValidationController {
             List<Map<String, Object>> detailRows = jdbcTemplate.queryForList("""
                 SELECT oi.ticket_number, oi.status AS ticket_status, oi.check_in_time, s.name AS service_name,
                        s.is_goods,
-                       v.id AS vehicle_id, v.license_plate, v.berat AS vehicle_berat, oi.service_type
+                       COALESCE(v.id, oi.vehicle_id) AS vehicle_id, COALESCE(v.license_plate, '-') AS license_plate, v.berat AS vehicle_berat, oi.service_type
                 FROM order_items oi
                 LEFT JOIN services s ON s.id = oi.service_id
-                LEFT JOIN vehicles v ON v.order_id = ?
+                LEFT JOIN vehicles v ON (v.order_id = oi.order_id OR (oi.vehicle_id IS NOT NULL AND v.id = oi.vehicle_id))
                 WHERE oi.order_id = ?
                 ORDER BY CASE WHEN oi.service_type = 'vehicle' THEN 0 ELSE 1 END, oi.id ASC
                 LIMIT 1
-            """, orderId, orderId);
+            """, orderId);
 
             if (!detailRows.isEmpty()) {
                 Map<String, Object> det = detailRows.get(0);
