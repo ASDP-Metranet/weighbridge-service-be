@@ -13,6 +13,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -333,6 +334,29 @@ public class WeighbridgeValidationController {
                 .createdAt(LocalDateTime.now())
                 .build();
         vehicleWeighingRepository.save(logEntity);
+    }
+
+    /**
+     * Cek apakah kode (Kode Booking / No Tiket / Order ID) sudah pernah bertransaksi timbang HARI INI.
+     * Dihitung sebagai transaksi: record vehicle_weighing berstatus SUCCESS, NOT_WEIGHED, atau SUPERSEDED
+     * (record REJECTED tidak dihitung). No Tiket juga dicocokkan lewat order_items, sehingga nomor tiket
+     * lain dalam order yang sama tetap terdeteksi.
+     * Response: true jika sudah pernah, false jika belum.
+     */
+    @GetMapping("/check-today")
+    public ResponseEntity<Boolean> checkTransactionToday(@RequestParam("code") String code) {
+        String input = code == null ? "" : code.trim().toUpperCase();
+        if (input.isEmpty()) {
+            return ResponseEntity.ok(false);
+        }
+
+        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+        LocalDateTime startOfNextDay = startOfDay.plusDays(1);
+
+        long count = vehicleWeighingRepository.countTransactionsByCode(
+                input, startOfDay, startOfNextDay, List.of("SUCCESS", "NOT_WEIGHED", "SUPERSEDED"));
+
+        return ResponseEntity.ok(count > 0);
     }
 
     /**
